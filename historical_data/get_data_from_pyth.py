@@ -53,7 +53,7 @@ closes = np.array(all_closes, dtype=np.float32)
 times = np.array(all_times, dtype=np.int64)
 
 # Save to npy
-# np.save("./historical_data/hist_data_pyth.npy", {"close": closes, "time": times})
+np.save("./historical_data/hist_data_pyth.npy", {"close": closes, "time": times})
 
 # Save to json
 with open("./historical_data/hist_data_pyth.json", "w", encoding="utf-8") as f:

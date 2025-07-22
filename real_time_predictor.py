@@ -27,7 +27,7 @@ from technical_analysis.coppock import Coppock
 
 
 class RealTimeBitcoinPredictor:
-    def __init__(self, base_model_path='models/base_model.h5'):
+    def __init__(self, base_model_path='models/full_dataset_model.h5'):
         """
         Real-time Bitcoin predictor with lightweight updates
         """
