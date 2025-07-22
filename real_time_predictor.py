@@ -432,12 +432,35 @@ class RealTimeBitcoinPredictor:
                     lower_95 = mc_result['lower_5'][-1]
                     upper_95 = mc_result['upper_95'][-1]
                     
+                    # Calculate prediction times (24 hours ahead in 5-minute intervals)
+                    prediction_start_time = datetime.now()
+                    prediction_times = []
+                    for i in range(len(mc_result['mean'])):
+                        pred_time = prediction_start_time + timedelta(minutes=5 * (i + 1))
+                        prediction_times.append(pred_time.strftime('%Y-%m-%d %H:%M:%S'))
+                    
                     print(f"\n📊 PREDICTION SUMMARY:")
+                    print(f"Prediction Time: {self.prediction_timestamp.strftime('%Y-%m-%d %H:%M:%S')}")
                     print(f"Current Price: ${current_price:,.2f}")
                     print(f"24h Prediction: ${mean_24h:,.2f}")
                     print(f"Change: ${mean_24h - current_price:+,.2f} ({((mean_24h/current_price - 1) * 100):+.2f}%)")
                     print(f"95% Confidence Interval: ${lower_95:,.2f} - ${upper_95:,.2f}")
                     print(f"Confidence Level: {mc_result['base_prediction']['confidence']:.2%}")
+                    
+                    # Print first few predictions with times
+                    print(f"\n🕐 NEXT 10 PREDICTIONS:")
+                    for i in range(min(10, len(mc_result['mean']))):
+                        pred_price = mc_result['mean'][i]
+                        pred_time = prediction_times[i]
+                        print(f"  {pred_time}: ${pred_price:,.2f}")
+                    
+                    # Print last few predictions with times
+                    if len(mc_result['mean']) > 10:
+                        print(f"  ...")
+                        for i in range(max(10, len(mc_result['mean']) - 5), len(mc_result['mean'])):
+                            pred_price = mc_result['mean'][i]
+                            pred_time = prediction_times[i]
+                            print(f"  {pred_time}: ${pred_price:,.2f}")
                     
                     # Save prediction
                     self.save_prediction(mc_result)
