@@ -5,7 +5,7 @@ import json
 import time
 
 intervals = {'240m':'240', '60m':'60', '15m':'15', '5m':'5'}
-start = '2025-07-22T00:00:00'
+start = '2021-01-01T00:00:00'
 trading_pair = 'Crypto.BTC/USD'
 BASE_URL = "https://benchmarks.pyth.network/v1/shims/tradingview/history"
 time_interval = 30 * 24 * 60 * 60  # 30 days in seconds
@@ -53,7 +53,7 @@ closes = np.array(all_closes, dtype=np.float32)
 times = np.array(all_times, dtype=np.int64)
 
 # Save to npy
-np.save("./historical_data/hist_data_pyth.npy", {"close": closes, "time": times})
+# np.save("./historical_data/hist_data_pyth.npy", {"close": closes, "time": times})
 
 # Save to json
 with open("./historical_data/hist_data_pyth.json", "w", encoding="utf-8") as f:
