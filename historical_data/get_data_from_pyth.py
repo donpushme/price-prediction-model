@@ -5,7 +5,7 @@ import json
 import time
 
 intervals = {'240m':'240', '60m':'60', '15m':'15', '5m':'5'}
-start = '2021-01-01T00:00:00'
+start = '2022-01-01T00:00:00'
 trading_pair = 'Crypto.BTC/USD'
 BASE_URL = "https://benchmarks.pyth.network/v1/shims/tradingview/history"
 time_interval = 30 * 24 * 60 * 60  # 30 days in seconds
