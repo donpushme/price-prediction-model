@@ -241,7 +241,16 @@ class RealTimeBitcoinPredictor:
             ).reshape(1, self.lookback_window, -1)
             
             # Make prediction
-            prediction_scaled = self.model.predict(input_scaled, verbose=0)
+            import sys
+            import os
+            # Suppress any output from model.predict
+            with open(os.devnull, 'w') as fnull:
+                old_stdout = sys.stdout
+                sys.stdout = fnull
+                try:
+                    prediction_scaled = self.model.predict(input_scaled, verbose=0)
+                finally:
+                    sys.stdout = old_stdout
             
             # Inverse scale
             prediction = self.price_scaler.inverse_transform(
