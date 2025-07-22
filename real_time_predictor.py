@@ -127,7 +127,7 @@ class RealTimeBitcoinPredictor:
         # Fetch recent OHLCV data
         prices, timestamps = self.fetch_bitcoin_ohlcv(limit=500)
         
-        if prices:
+        if len(prices) > 0:
             self.price_buffer.extend(prices)
             self.timestamp_buffer.extend(timestamps)
             print(f"Initialized with {len(prices)} historical price points")
