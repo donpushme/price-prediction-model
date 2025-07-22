@@ -233,13 +233,7 @@ class RealTimeBitcoinPredictor:
             
             # Prepare input sequence
             input_features = features[-self.lookback_window:]
-            input_prices = prices[-self.lookback_window:]
-            
-            # Combine features and prices
-            input_sequence = np.concatenate([
-                input_features,
-                input_prices.reshape(-1, 1)
-            ], axis=1)
+            input_sequence = input_features  # Price already included in features
             
             # Scale input
             input_scaled = self.feature_scaler.transform(
