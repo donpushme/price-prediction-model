@@ -57,10 +57,10 @@ class RealTimeBitcoinPredictor:
         try:
             print("Loading base model...")
             self.model = load_model(model_path)
-            self.feature_scaler = joblib.load('models/feature_scaler.pkl')
-            self.price_scaler = joblib.load('models/price_scaler.pkl')
+            self.feature_scaler = joblib.load('models/feature_scaler_full.pkl')
+            self.price_scaler = joblib.load('models/price_scaler_full.pkl')
             
-            with open('models/base_model_config.json', 'r') as f:
+            with open('models/full_model_config.json', 'r') as f:
                 self.config = json.load(f)
             
             print("Base model loaded successfully!")
