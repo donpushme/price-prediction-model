@@ -150,39 +150,63 @@ class RealTimeBitcoinPredictor:
             cop = Coppock(price_array, wma_pd=10, roc_long=6, roc_short=3).values
             inter_slope = PolyInter(price_array, progress_bar=False).values
             
-            # Find minimum length
-            min_len = min(len(macd), len(stoch_rsi), len(dpo), len(cop), len(inter_slope))
+            # Apply consistent truncation (same as base_model_trainer)
+            features_dict = {
+                'macd': macd[30:-1] if len(macd) > 31 else macd[30:] if len(macd) > 30 else macd,
+                'stoch_rsi': stoch_rsi[30:-1] if len(stoch_rsi) > 31 else stoch_rsi[30:] if len(stoch_rsi) > 30 else stoch_rsi,
+                'inter_slope': inter_slope[30:-1] if len(inter_slope) > 31 else inter_slope[30:] if len(inter_slope) > 30 else inter_slope,
+                'dpo': dpo[30:-1] if len(dpo) > 31 else dpo[30:] if len(dpo) > 30 else dpo,
+                'cop': cop[30:-1] if len(cop) > 31 else cop[30:] if len(cop) > 30 else cop
+            }
+            
+            # Find minimum length and align
+            min_len = min(len(feature) for feature in features_dict.values() if len(feature) > 0)
+            
+            if min_len == 0:
+                raise ValueError("All features have zero length")
             
             if min_len < self.lookback_window:
                 return None
             
-            # Take the last values
-            features = np.column_stack([
-                macd[-min_len:],
-                stoch_rsi[-min_len:],
-                inter_slope[-min_len:],
-                dpo[-min_len:],
-                cop[-min_len:]
-            ])
+            # Align all features to the same length
+            aligned_features = []
+            for feature in features_dict.values():
+                if len(feature) >= min_len:
+                    aligned_features.append(feature[-min_len:])
+                else:
+                    aligned_features.append(feature)
+            
+            # Stack technical features
+            X = np.array(aligned_features).T
             
             # Add price-based features
-            aligned_prices = price_array[-min_len:]
-            returns = np.diff(aligned_prices) / aligned_prices[:-1]
-            volatility = pd.Series(returns).rolling(window=20).std().fillna(0).values
+            price_start_idx = max(0, len(price_array) - min_len - 1)
+            aligned_prices = price_array[price_start_idx:price_start_idx + min_len + 1]
             
-            price_features = np.column_stack([
-                aligned_prices[1:],
-                returns,
-                volatility[1:]
-            ])
-            
-            # Combine features
-            combined_features = np.column_stack([
-                features[1:],
-                price_features
-            ])
-            
-            return combined_features, aligned_prices[1:]
+            if len(aligned_prices) > 1:
+                returns = np.diff(aligned_prices) / (aligned_prices[:-1] + 1e-8)  # Avoid division by zero
+                
+                if len(returns) >= 20:
+                    volatility = pd.Series(returns).rolling(window=20, min_periods=1).std().fillna(0).values
+                else:
+                    volatility = np.full_like(returns, np.std(returns) if len(returns) > 1 else 0.0)
+                
+                current_prices = aligned_prices[1:]
+                
+                # Final alignment
+                final_len = min(len(X), len(current_prices), len(returns), len(volatility))
+                X = X[-final_len:]
+                current_prices = current_prices[-final_len:]
+                returns = returns[-final_len:]
+                volatility = volatility[-final_len:]
+                
+                # Combine features
+                price_features = np.column_stack([current_prices, returns, volatility])
+                combined_features = np.column_stack([X, price_features])
+                
+                return combined_features, current_prices
+            else:
+                raise ValueError("Not enough price data in chunk")
             
         except Exception as e:
             print(f"Error calculating features: {e}")
