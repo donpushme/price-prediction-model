@@ -74,8 +74,15 @@ class RealTimeBitcoinPredictor:
         """Fetch latest Bitcoin price from API"""
         try:
             # Using CoinGecko API (free, no API key required)
-            end_dt = datetime.now(timezone.utc)
+            # Get the current time and round down to the nearest 5-minute interval
+            current_dt = datetime.now(timezone.utc)
+            
+            # Round down to the nearest 1-2 minute interval that has passed
+            # Get the most recent price data available (1-2 minutes ago)
+            end_dt = current_dt - timedelta(minutes=2)
+            end_dt = end_dt.replace(second=0, microsecond=0)  # Round to minute
             start_dt = end_dt - timedelta(days=1)
+            
             trading_pair = 'Crypto.BTC/USD'
             url = "https://benchmarks.pyth.network/v1/shims/tradingview/history"
             response = requests.get(url, params={
@@ -88,6 +95,7 @@ class RealTimeBitcoinPredictor:
             price = float(response.json()['c'][-1])
             timestamp = int(response.json()['t'][-1])
             
+            print(f"Fetched price from: {datetime.fromtimestamp(timestamp, tz=timezone.utc).strftime('%Y-%m-%d %H:%M:%S')}")
             return price, timestamp
             
         except Exception as e:
