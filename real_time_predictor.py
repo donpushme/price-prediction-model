@@ -286,6 +286,10 @@ class RealTimeBitcoinPredictor:
         """Fast Monte Carlo simulation for real-time use"""
         print("Running Monte Carlo simulation...")
         
+        # Suppress output during Monte Carlo simulation
+        import sys
+        import os
+        
         base_pred = self.predict_24h()
         if base_pred is None:
             return None
@@ -307,7 +311,15 @@ class RealTimeBitcoinPredictor:
                 self.price_buffer.clear()
                 self.price_buffer.extend(noisy_buffer)
                 
-                pred = self.predict_24h()
+                # Suppress output during simulation predictions
+                with open(os.devnull, 'w') as fnull:
+                    old_stdout = sys.stdout
+                    sys.stdout = fnull
+                    try:
+                        pred = self.predict_24h()
+                    finally:
+                        sys.stdout = old_stdout
+                
                 if pred is not None:
                     simulations.append(pred['prices'])
                 else:
@@ -412,8 +424,8 @@ class RealTimeBitcoinPredictor:
             print(f"Error in lightweight update: {e}")
             return False
     
-    def continuous_prediction_loop(self, update_interval=300, mc_simulations=500):
-        """Main loop for continuous predictions every 5 minutes"""
+    def continuous_prediction_loop(self, update_interval=60, mc_simulations=500):
+        """Main loop for continuous predictions every minute"""
         print("Starting continuous prediction loop...")
         print(f"Predictions every {update_interval} seconds ({update_interval/60:.1f} minutes)")
         
@@ -437,50 +449,48 @@ class RealTimeBitcoinPredictor:
                 
                 # Generate prediction
                 print("Generating 24-hour prediction...")
-                mc_result = self.monte_carlo_prediction(n_simulations=mc_simulations)
+                pred_result = self.predict_24h()
                 
-                if mc_result:
-                    self.current_prediction = mc_result
+                if pred_result:
+                    self.current_prediction = pred_result
                     self.prediction_timestamp = datetime.now()
                     
                     # Display prediction summary
-                    current_price = mc_result['base_prediction']['current_price']
-                    mean_24h = mc_result['mean'][-1]
-                    lower_95 = mc_result['lower_5'][-1]
-                    upper_95 = mc_result['upper_95'][-1]
+                    current_price = pred_result['current_price']
+                    predicted_prices = pred_result['prices']
+                    final_24h_price = predicted_prices[-1]
                     
                     # Calculate prediction times (24 hours ahead in 5-minute intervals)
                     prediction_start_time = datetime.now()
                     prediction_times = []
-                    for i in range(len(mc_result['mean'])):
+                    for i in range(len(predicted_prices)):
                         pred_time = prediction_start_time + timedelta(minutes=5 * (i + 1))
                         prediction_times.append(pred_time.strftime('%Y-%m-%d %H:%M:%S'))
                     
                     print(f"\n📊 PREDICTION SUMMARY:")
                     print(f"Prediction Time: {self.prediction_timestamp.strftime('%Y-%m-%d %H:%M:%S')}")
                     print(f"Current Price: ${current_price:,.2f}")
-                    print(f"24h Prediction: ${mean_24h:,.2f}")
-                    print(f"Change: ${mean_24h - current_price:+,.2f} ({((mean_24h/current_price - 1) * 100):+.2f}%)")
-                    print(f"95% Confidence Interval: ${lower_95:,.2f} - ${upper_95:,.2f}")
-                    print(f"Confidence Level: {mc_result['base_prediction']['confidence']:.2%}")
+                    print(f"24h Prediction: ${final_24h_price:,.2f}")
+                    print(f"Change: ${final_24h_price - current_price:+,.2f} ({((final_24h_price/current_price - 1) * 100):+.2f}%)")
+                    print(f"Confidence Level: {pred_result['confidence']:.2%}")
                     
                     # Print first few predictions with times
                     print(f"\n🕐 NEXT 10 PREDICTIONS:")
-                    for i in range(min(10, len(mc_result['mean']))):
-                        pred_price = mc_result['mean'][i]
+                    for i in range(min(10, len(predicted_prices))):
+                        pred_price = predicted_prices[i]
                         pred_time = prediction_times[i]
                         print(f"  {pred_time}: ${pred_price:,.2f}")
                     
                     # Print last few predictions with times
-                    if len(mc_result['mean']) > 10:
+                    if len(predicted_prices) > 10:
                         print(f"  ...")
-                        for i in range(max(10, len(mc_result['mean']) - 5), len(mc_result['mean'])):
-                            pred_price = mc_result['mean'][i]
+                        for i in range(max(10, len(predicted_prices) - 5), len(predicted_prices)):
+                            pred_price = predicted_prices[i]
                             pred_time = prediction_times[i]
                             print(f"  {pred_time}: ${pred_price:,.2f}")
                     
                     # Save prediction
-                    self.save_prediction(mc_result)
+                    self.save_prediction(pred_result)
                     
                     # Lightweight model update every 10 predictions
                     if self.update_count % 10 == 0 and self.update_count > 0:
@@ -532,17 +542,10 @@ class RealTimeBitcoinPredictor:
             # Prepare data for JSON serialization
             save_data = {
                 'timestamp': timestamp,
-                'current_price': float(prediction_data['base_prediction']['current_price']),
-                'predictions_24h': prediction_data['mean'].tolist(),
-                'confidence_intervals': {
-                    'lower_5': prediction_data['lower_5'].tolist(),
-                    'upper_95': prediction_data['upper_95'].tolist(),
-                    'lower_25': prediction_data['lower_25'].tolist(),
-                    'upper_75': prediction_data['upper_75'].tolist()
-                },
-                'confidence': float(prediction_data['base_prediction']['confidence']),
-                'volatility': float(prediction_data['base_prediction']['volatility']),
-                'n_simulations': prediction_data['n_simulations'],
+                'current_price': float(prediction_data['current_price']),
+                'predictions_24h': prediction_data['prices'].tolist(),
+                'confidence': float(prediction_data['confidence']),
+                'volatility': float(prediction_data['volatility']),
                 'update_number': self.update_count
             }
             
@@ -617,8 +620,8 @@ def main():
         
         # Start continuous loop
         predictor.continuous_prediction_loop(
-            update_interval=300,  # 5 minutes
-            mc_simulations=100    # 500 Monte Carlo simulations
+            update_interval=60,   # 1 minute
+            mc_simulations=100    # Not used anymore but kept for compatibility
         )
         
     except FileNotFoundError:
