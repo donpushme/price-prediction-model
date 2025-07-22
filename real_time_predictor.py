@@ -282,76 +282,6 @@ class RealTimeBitcoinPredictor:
             print(f"Error in prediction: {e}")
             return None
     
-    def monte_carlo_prediction(self, n_simulations=500, noise_factor=0.005):
-        """Fast Monte Carlo simulation for real-time use"""
-        print("Running Monte Carlo simulation...")
-        
-        # Suppress output during Monte Carlo simulation
-        import sys
-        import os
-        
-        base_pred = self.predict_24h()
-        if base_pred is None:
-            return None
-        
-        simulations = []
-        base_prices = base_pred['prices']
-        
-        # Generate simulations quickly
-        for _ in range(n_simulations):
-            # Add noise to recent prices
-            noisy_buffer = list(self.price_buffer)
-            noise = np.random.normal(0, noise_factor * np.std(noisy_buffer[-100:]), len(noisy_buffer))
-            noisy_buffer = np.array(noisy_buffer) + noise
-            
-            # Quick prediction with noisy data
-            try:
-                # Update buffer temporarily
-                old_buffer = self.price_buffer.copy()
-                self.price_buffer.clear()
-                self.price_buffer.extend(noisy_buffer)
-                
-                # Suppress output during simulation predictions
-                with open(os.devnull, 'w') as fnull:
-                    old_stdout = sys.stdout
-                    sys.stdout = fnull
-                    try:
-                        pred = self.predict_24h()
-                    finally:
-                        sys.stdout = old_stdout
-                
-                if pred is not None:
-                    simulations.append(pred['prices'])
-                else:
-                    # Fallback: add noise to base prediction
-                    noise_pred = base_prices + np.random.normal(0, noise_factor * np.std(base_prices), len(base_prices))
-                    simulations.append(noise_pred)
-                
-                # Restore original buffer
-                self.price_buffer = old_buffer
-                
-            except:
-                # Fallback if anything fails
-                noise_pred = base_prices + np.random.normal(0, noise_factor * np.std(base_prices), len(base_prices))
-                simulations.append(noise_pred)
-        
-        # Calculate statistics
-        simulations = np.array(simulations)
-        
-        result = {
-            'mean': np.mean(simulations, axis=0),
-            'std': np.std(simulations, axis=0),
-            'lower_5': np.percentile(simulations, 5, axis=0),
-            'upper_95': np.percentile(simulations, 95, axis=0),
-            'lower_25': np.percentile(simulations, 25, axis=0),
-            'upper_75': np.percentile(simulations, 75, axis=0),
-            'base_prediction': base_pred,
-            'n_simulations': len(simulations),
-            'timestamp': datetime.now()
-        }
-        
-        return result
-    
     def update_model_lightweight(self, learning_rate=0.0001):
         """Lightweight model update with recent data"""
         try:
@@ -443,6 +373,8 @@ class RealTimeBitcoinPredictor:
                 if latest_price:
                     self.price_buffer.append(latest_price)
                     self.timestamp_buffer.append(timestamp)
+                    current_time = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    print(f"Current Time: {current_time}")
                     print(f"Current Bitcoin Price: ${latest_price:,.2f}")
                 else:
                     print("Warning: Could not fetch latest price")
