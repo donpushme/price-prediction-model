@@ -64,7 +64,7 @@ class RealTimeBitcoinPredictor:
                 self.config = json.load(f)
             
             print("Base model loaded successfully!")
-            print(f"Model trained on {self.config['training_stats']['training_samples']:,} samples")
+            print(f"Model config: {self.config}")
             
         except Exception as e:
             print(f"Error loading base model: {e}")
