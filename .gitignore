@@ -7,3 +7,16 @@ keys.txt
 # do not upload models
 *.dump
 *.h5
+
+.venv
+/prediction
+
+.venv/bin/
+.venv/lib/
+.venv/lib64
+.venv/pyvenv.cfg
+.venv/share/
+historical_data/hist_data_pyth.json
+historical_data/hist_data_pyth.npy
+models/
+predictions/
