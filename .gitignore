@@ -7,3 +7,9 @@ keys.txt
 # do not upload models
 *.dump
 *.h5
+
+.venv
+
+/historical_data/*.json
+/historical_data/*.scv
+/historical_data/*.npy
