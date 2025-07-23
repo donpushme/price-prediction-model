@@ -265,9 +265,40 @@ class RealTimeBitcoinPredictor:
                 prediction_scaled.reshape(-1, 1)
             ).flatten()
             
+            # Apply continuity constraint: ensure first prediction is close to current price
+            current_price = prices[-1]
+            first_prediction = prediction[0]
+            
+            # If first prediction is too far from current price, adjust the entire sequence
+            price_diff_ratio = abs(first_prediction - current_price) / current_price
+            
+            if price_diff_ratio > 0.02:  # If difference > 2%
+                print(f"⚠️ Large initial prediction difference detected: {price_diff_ratio:.2%}")
+                print(f"Current: ${current_price:,.2f}, First prediction: ${first_prediction:,.2f}")
+                
+                # Calculate adjustment factor to make first prediction closer to current price
+                # Use a smooth transition: first prediction should be within 1% of current price
+                target_first_prediction = current_price * (1 + np.sign(first_prediction - current_price) * 0.01)
+                adjustment_factor = target_first_prediction / first_prediction
+                
+                # Apply gradual adjustment across the prediction sequence
+                for i in range(len(prediction)):
+                    # Gradual adjustment: stronger at beginning, weaker at end
+                    adjustment_strength = 1.0 - (i / len(prediction)) * 0.5
+                    adjusted_factor = 1.0 + (adjustment_factor - 1.0) * adjustment_strength
+                    prediction[i] *= adjusted_factor
+                
+                print(f"✅ Applied continuity adjustment. New first prediction: ${prediction[0]:,.2f}")
+            
             # Calculate confidence (based on recent price volatility)
             recent_volatility = np.std(prices[-50:])
             confidence = max(0.1, 1.0 - (recent_volatility / np.mean(prices[-50:])))
+            
+            # Additional confidence penalty for large initial jumps
+            initial_jump = abs(prediction[0] - current_price) / current_price
+            if initial_jump > 0.01:  # 1% jump
+                confidence *= (1.0 - initial_jump * 2)  # Reduce confidence for large jumps
+                confidence = max(0.1, confidence)
             
             return {
                 'prices': prediction,
@@ -406,12 +437,30 @@ class RealTimeBitcoinPredictor:
                     print(f"Change: ${final_24h_price - current_price:+,.2f} ({((final_24h_price/current_price - 1) * 100):+.2f}%)")
                     print(f"Confidence Level: {pred_result['confidence']:.2%}")
                     
-                    # Print first few predictions with times
-                    print(f"\n🕐 NEXT 10 PREDICTIONS:")
-                    for i in range(min(10, len(predicted_prices))):
+                    # Show immediate predictions (first 30 minutes) with continuity check
+                    print(f"\n🕐 IMMEDIATE PREDICTIONS (Next 30 minutes):")
+                    for i in range(min(6, len(predicted_prices))):  # 6 predictions = 30 minutes
                         pred_price = predicted_prices[i]
                         pred_time = prediction_times[i]
-                        print(f"  {pred_time}: ${pred_price:,.2f}")
+                        if i == 0:
+                            change_5min = pred_price - current_price
+                            change_pct = (change_5min / current_price) * 100
+                            print(f"  {pred_time}: ${pred_price:,.2f} ({change_5min:+,.2f}, {change_pct:+.2f}%)")
+                        else:
+                            prev_price = predicted_prices[i-1]
+                            change_5min = pred_price - prev_price
+                            change_pct = (change_5min / prev_price) * 100
+                            print(f"  {pred_time}: ${pred_price:,.2f} ({change_5min:+,.2f}, {change_pct:+.2f}%)")
+                    
+                    # Show hourly predictions
+                    print(f"\n🕐 HOURLY PREDICTIONS:")
+                    for i in range(12, len(predicted_prices), 12):  # Every 12 predictions = 1 hour
+                        pred_price = predicted_prices[i]
+                        pred_time = prediction_times[i]
+                        hours_ahead = (i + 1) // 12
+                        change_from_current = pred_price - current_price
+                        change_pct = (change_from_current / current_price) * 100
+                        print(f"  +{hours_ahead}h ({pred_time}): ${pred_price:,.2f} ({change_from_current:+,.2f}, {change_pct:+.2f}%)")
                     
                     # Print last few predictions with times
                     if len(predicted_prices) > 10:
