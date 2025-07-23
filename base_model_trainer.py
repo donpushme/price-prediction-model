@@ -485,49 +485,68 @@ class DynamicMemoryBitcoinPredictor:
         return train_gen, val_gen, optimal_batch_size
     
     def build_adaptive_model(self, input_shape):
-        """Build model that adapts to available memory"""
-        print("Building adaptive LSTM model...")
+        """Build an adaptive LSTM model based on input shape"""
+        print(f"Building model for input shape: {input_shape}")
         
-        available_memory = MemoryMonitor.get_available_memory()
+        # Calculate model complexity based on data size
+        data_info = self.data_manager.get_data_info()
+        n_samples = data_info['n_samples']
         
-        # Adjust model size based on available memory
-        if available_memory > 8:  # High memory
-            lstm_units = [256, 128, 64]
-            dense_units = [128, 64]
-        elif available_memory > 4:  # Medium memory
-            lstm_units = [128, 64, 32]
-            dense_units = [64, 32]
-        else:  # Low memory
-            lstm_units = [64, 32]
-            dense_units = [32]
+        # Adjust model complexity based on dataset size
+        if n_samples > 100000:  # Large dataset
+            lstm_units = [64, 64, 32]
+            dense_units = [32, 16]
+            dropout_rate = 0.3
+            print("Using large dataset configuration")
+        elif n_samples > 50000:  # Medium dataset
+            lstm_units = [48, 48, 24]
+            dense_units = [24, 12]
+            dropout_rate = 0.25
+            print("Using medium dataset configuration")
+        else:  # Small dataset
+            lstm_units = [32, 32, 16]
+            dense_units = [16, 8]
+            dropout_rate = 0.2
+            print("Using small dataset configuration")
         
-        print(f"Using model configuration for {available_memory:.1f}GB memory:")
-        print(f"LSTM units: {lstm_units}")
-        print(f"Dense units: {dense_units}")
-        
-        # Build model
         model = Sequential()
         
-        # LSTM layers
-        for i, units in enumerate(lstm_units):
-            return_sequences = i < len(lstm_units) - 1
-            if i == 0:
-                model.add(LSTM(units, return_sequences=return_sequences, input_shape=input_shape))
-            else:
-                model.add(LSTM(units, return_sequences=return_sequences))
-            model.add(Dropout(0.3))
+        # First LSTM layer
+        model.add(LSTM(lstm_units[0], input_shape=input_shape, return_sequences=True))
+        model.add(Dropout(dropout_rate))
+        model.add(BatchNormalization())
+        
+        # Second LSTM layer
+        model.add(LSTM(lstm_units[1], return_sequences=True))
+        model.add(Dropout(dropout_rate))
+        model.add(BatchNormalization())
+        
+        # Third LSTM layer (if dataset is large enough)
+        if len(lstm_units) > 2:
+            model.add(LSTM(lstm_units[2], return_sequences=False))
+            model.add(Dropout(dropout_rate))
+            model.add(BatchNormalization())
         
         # Dense layers
         for units in dense_units:
             model.add(Dense(units, activation='relu'))
-            model.add(Dropout(0.2))
+            model.add(Dropout(dropout_rate * 0.5))
+            model.add(BatchNormalization())
         
         # Output layer
         model.add(Dense(self.prediction_horizon, activation='linear'))
         
-        # Compile
-        optimizer = Adam(learning_rate=0.001)
-        model.compile(optimizer=optimizer, loss='huber', metrics=['mae'])
+        # Compile model
+        model.compile(
+            optimizer=Adam(learning_rate=0.001),
+            loss='huber',  # Robust to outliers
+            metrics=['mae', 'mse']
+        )
+        
+        # Print model summary
+        print(f"Model parameters: {model.count_params():,}")
+        print(f"Dataset size: {n_samples:,} samples")
+        print(f"Model complexity: {'High' if n_samples > 100000 else 'Medium' if n_samples > 50000 else 'Low'}")
         
         return model
     
@@ -567,7 +586,7 @@ class DynamicMemoryBitcoinPredictor:
             ),
             EarlyStopping(
                 monitor='val_loss',
-                patience=20,
+                patience=100,  # Increased patience for large datasets
                 restore_best_weights=True,
                 verbose=1
             ),
@@ -643,9 +662,47 @@ def main():
         else:
             bitcoin_prices = np.array(data)
         
+        # Data validation and quality checks
         print(f"Loaded {len(bitcoin_prices):,} price points")
         print(f"Price range: ${bitcoin_prices.min():.2f} - ${bitcoin_prices.max():.2f}")
         print(f"Data covers approximately {len(bitcoin_prices) * 5 / (60 * 24):.1f} days")
+        
+        # Check for data quality issues
+        if len(bitcoin_prices) < 10000:
+            print("⚠️ Warning: Very small dataset. Consider collecting more data.")
+        
+        # Check for price anomalies
+        price_changes = np.diff(bitcoin_prices) / bitcoin_prices[:-1]
+        max_change = np.max(np.abs(price_changes))
+        print(f"Maximum single-period price change: {max_change:.2%}")
+        
+        if max_change > 0.5:  # 50% change
+            print("⚠️ Warning: Large price changes detected. Check for data errors.")
+        
+        # Check for missing/invalid data
+        invalid_prices = np.sum((bitcoin_prices <= 0) | np.isnan(bitcoin_prices) | np.isinf(bitcoin_prices))
+        if invalid_prices > 0:
+            print(f"⚠️ Warning: {invalid_prices} invalid price points found")
+            # Remove invalid prices
+            bitcoin_prices = bitcoin_prices[(bitcoin_prices > 0) & ~np.isnan(bitcoin_prices) & ~np.isinf(bitcoin_prices)]
+            print(f"Cleaned dataset: {len(bitcoin_prices):,} valid price points")
+        
+        # Check data distribution
+        print(f"Price statistics:")
+        print(f"  Mean: ${bitcoin_prices.mean():,.2f}")
+        print(f"  Median: ${np.median(bitcoin_prices):,.2f}")
+        print(f"  Std Dev: ${bitcoin_prices.std():,.2f}")
+        
+        # Estimate training time
+        estimated_sequences = len(bitcoin_prices) - predictor.lookback_window - predictor.prediction_horizon + 1
+        print(f"Estimated training sequences: {estimated_sequences:,}")
+        
+        if estimated_sequences < 1000:
+            print("⚠️ Warning: Very few training sequences. Model may not learn effectively.")
+        
+        print("\n" + "="*60)
+        print("DATA VALIDATION COMPLETE - STARTING TRAINING")
+        print("="*60)
         
         # Train on full dataset
         history = predictor.train_full_dataset(bitcoin_prices, epochs=100)
