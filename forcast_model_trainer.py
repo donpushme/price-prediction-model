@@ -8,7 +8,6 @@ from keras.optimizers import Adam
 from sklearn.preprocessing import StandardScaler
 import joblib
 
-# --- Config ---
 LOOKBACK = 288  # 24 hours of 5-min data
 HORIZON = 288   # Predict next 24 hours (5-min intervals)
 MODEL_DIR = 'models/forcast_deltas/'
@@ -26,12 +25,10 @@ if isinstance(data, dict):
 else:
     prices = np.array(data, dtype=np.float32)
 
-# --- Data Quality Checks ---
 prices = prices[(prices > 0) & ~np.isnan(prices) & ~np.isinf(prices)]
 
-# --- Feature Engineering (simple: just price for now) ---
-X = []
-y = []
+# --- Feature Engineering ---
+X, y = [], []
 for i in range(len(prices) - LOOKBACK - HORIZON):
     x_seq = prices[i:i+LOOKBACK]
     y_seq = prices[i+LOOKBACK:i+LOOKBACK+HORIZON] - prices[i+LOOKBACK-1]  # DELTAS
@@ -46,7 +43,6 @@ X_scaled = scaler_X.fit_transform(X)
 scaler_y = StandardScaler()
 y_scaled = scaler_y.fit_transform(y)
 
-# --- Reshape for LSTM ---
 X_scaled = X_scaled.reshape((-1, LOOKBACK, 1))
 
 # --- Model ---
