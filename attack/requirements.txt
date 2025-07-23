@@ -1,9 +1,0 @@
-Install Python >= 3.10
-
-## Blocking incoming icmp echo replies
-sudo iptables -A INPUT -p icmp --icmp-type echo-reply -j DROP
-
-## Add Target IP address to white_list.txt
-
-## Run Project(7 threads)
-python ping_attack.py
