@@ -9,6 +9,7 @@ keys.txt
 *.h5
 
 .venv
+<<<<<<< HEAD
 /prediction
 
 .venv/bin/
@@ -20,3 +21,9 @@ historical_data/hist_data_pyth.json
 historical_data/hist_data_pyth.npy
 models/
 predictions/
+=======
+
+/historical_data/*.json
+/historical_data/*.scv
+/historical_data/*.npy
+>>>>>>> 0d10b6fabe6ebe2898d7f82d1bd2da62c7411630

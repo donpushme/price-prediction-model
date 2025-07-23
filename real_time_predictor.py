@@ -27,16 +27,33 @@ from technical_analysis.coppock import Coppock
 
 
 class RealTimeBitcoinPredictor:
-    def __init__(self, base_model_path='models/full_dataset_model.h5'):
+    def __init__(self, base_model_path='models/full_dataset_model.h5', delta_model_dir='models/forcast_deltas/'):
         """
         Real-time Bitcoin predictor with lightweight updates
+        If delta_model_dir is provided, use the delta-based model.
         """
         self.lookback_window = 288  # 24 hours
-        self.prediction_horizon = 289  # Next 24 hours + 1
-        
-        # Load base model and scalers
-        self.load_base_model(base_model_path)
-        
+        self.prediction_horizon = 288  # Next 24 hours
+        self.use_deltas = False
+        self.delta_model_dir = delta_model_dir
+        if os.path.exists(os.path.join(delta_model_dir, 'lstm_deltas_model.h5')):
+            print("Loading delta-based forecasting model...")
+            self.model = load_model(os.path.join(delta_model_dir, 'lstm_deltas_model.h5'))
+            self.scaler_X = joblib.load(os.path.join(delta_model_dir, 'scaler_X.dump'))
+            self.scaler_y = joblib.load(os.path.join(delta_model_dir, 'scaler_y.dump'))
+            self.use_deltas = True
+        else:
+            print("Loading base model...")
+            self.model = load_model(base_model_path)
+            self.feature_scaler = joblib.load('models/feature_scaler_full.pkl')
+            self.price_scaler = joblib.load('models/price_scaler_full.pkl')
+            
+            with open('models/full_model_config.json', 'r') as f:
+                self.config = json.load(f)
+            
+            print("Base model loaded successfully!")
+            print(f"Model config: {self.config}")
+            
         # Real-time data buffer (store recent 1000 data points)
         self.price_buffer = deque(maxlen=1000)
         self.timestamp_buffer = deque(maxlen=1000)
@@ -223,92 +240,124 @@ class RealTimeBitcoinPredictor:
     def predict_24h(self):
         """Generate 24-hour price prediction"""
         try:
-            if len(self.price_buffer) < 300:  # Need sufficient data
+            if len(self.price_buffer) < self.lookback_window:
                 print("Insufficient data for prediction")
                 return None
             
-            # Calculate features
-            result = self.calculate_features_fast(list(self.price_buffer))
-            if result is None:
-                print("Could not calculate features")
-                return None
-            
-            features, prices = result
-            
-            if len(features) < self.lookback_window:
-                print("Not enough feature data")
-                return None
-            
-            # Prepare input sequence
-            input_features = features[-self.lookback_window:]
-            input_sequence = input_features  # Price already included in features
-            
-            # Scale input
-            input_scaled = self.feature_scaler.transform(
-                input_sequence.reshape(-1, input_sequence.shape[1])
-            ).reshape(1, self.lookback_window, -1)
-            
-            # Make prediction
-            import sys
-            import os
-            # Suppress any output from model.predict
-            with open(os.devnull, 'w') as fnull:
-                old_stdout = sys.stdout
-                sys.stdout = fnull
-                try:
-                    prediction_scaled = self.model.predict(input_scaled, verbose=0)
-                finally:
-                    sys.stdout = old_stdout
-            
-            # Inverse scale
-            prediction = self.price_scaler.inverse_transform(
-                prediction_scaled.reshape(-1, 1)
-            ).flatten()
-            
-            # Apply continuity constraint: ensure first prediction is close to current price
-            current_price = prices[-1]
-            first_prediction = prediction[0]
-            
-            # If first prediction is too far from current price, adjust the entire sequence
-            price_diff_ratio = abs(first_prediction - current_price) / current_price
-            
-            if price_diff_ratio > 0.02:  # If difference > 2%
-                print(f"⚠️ Large initial prediction difference detected: {price_diff_ratio:.2%}")
-                print(f"Current: ${current_price:,.2f}, First prediction: ${first_prediction:,.2f}")
+            if self.use_deltas:
+                # --- DELTA-BASED MODEL ---
+                # Prepare input (just price history)
+                prices = np.array(self.price_buffer)[-self.lookback_window:]
+                X = prices.reshape(1, -1)
+                X_scaled = self.scaler_X.transform(X).reshape(1, self.lookback_window, 1)
+                # Predict deltas
+                import sys, os
+                with open(os.devnull, 'w') as fnull:
+                    old_stdout = sys.stdout
+                    sys.stdout = fnull
+                    try:
+                        pred_deltas_scaled = self.model.predict(X_scaled, verbose=0)
+                    finally:
+                        sys.stdout = old_stdout
+                # Inverse scale deltas
+                pred_deltas = self.scaler_y.inverse_transform(pred_deltas_scaled).flatten()
+                # Reconstruct price path
+                current_price = prices[-1]
+                predicted_prices = current_price + np.cumsum(pred_deltas)
+                # Confidence: based on volatility of last 50 prices
+                recent_volatility = np.std(prices[-50:])
+                confidence = max(0.1, 1.0 - (recent_volatility / np.mean(prices[-50:])))
+                return {
+                    'prices': predicted_prices,
+                    'confidence': confidence,
+                    'timestamp': datetime.now(),
+                    'current_price': current_price,
+                    'lookback_start': prices[0],
+                    'volatility': recent_volatility
+                }
+            else:
+                # --- ABSOLUTE PRICE MODEL (legacy) ---
+                # Calculate features
+                result = self.calculate_features_fast(list(self.price_buffer))
+                if result is None:
+                    print("Could not calculate features")
+                    return None
                 
-                # Calculate adjustment factor to make first prediction closer to current price
-                # Use a smooth transition: first prediction should be within 1% of current price
-                target_first_prediction = current_price * (1 + np.sign(first_prediction - current_price) * 0.01)
-                adjustment_factor = target_first_prediction / first_prediction
+                features, prices = result
                 
-                # Apply gradual adjustment across the prediction sequence
-                for i in range(len(prediction)):
-                    # Gradual adjustment: stronger at beginning, weaker at end
-                    adjustment_strength = 1.0 - (i / len(prediction)) * 0.5
-                    adjusted_factor = 1.0 + (adjustment_factor - 1.0) * adjustment_strength
-                    prediction[i] *= adjusted_factor
+                if len(features) < self.lookback_window:
+                    print("Not enough feature data")
+                    return None
                 
-                print(f"✅ Applied continuity adjustment. New first prediction: ${prediction[0]:,.2f}")
-            
-            # Calculate confidence (based on recent price volatility)
-            recent_volatility = np.std(prices[-50:])
-            confidence = max(0.1, 1.0 - (recent_volatility / np.mean(prices[-50:])))
-            
-            # Additional confidence penalty for large initial jumps
-            initial_jump = abs(prediction[0] - current_price) / current_price
-            if initial_jump > 0.01:  # 1% jump
-                confidence *= (1.0 - initial_jump * 2)  # Reduce confidence for large jumps
-                confidence = max(0.1, confidence)
-            
-            return {
-                'prices': prediction,
-                'confidence': confidence,
-                'timestamp': datetime.now(),
-                'current_price': prices[-1],
-                'lookback_start': prices[-self.lookback_window],
-                'volatility': recent_volatility
-            }
-            
+                # Prepare input sequence
+                input_features = features[-self.lookback_window:]
+                input_sequence = input_features  # Price already included in features
+                
+                # Scale input
+                input_scaled = self.feature_scaler.transform(
+                    input_sequence.reshape(-1, input_sequence.shape[1])
+                ).reshape(1, self.lookback_window, -1)
+                
+                # Make prediction
+                import sys
+                import os
+                # Suppress any output from model.predict
+                with open(os.devnull, 'w') as fnull:
+                    old_stdout = sys.stdout
+                    sys.stdout = fnull
+                    try:
+                        prediction_scaled = self.model.predict(input_scaled, verbose=0)
+                    finally:
+                        sys.stdout = old_stdout
+                
+                # Inverse scale
+                prediction = self.price_scaler.inverse_transform(
+                    prediction_scaled.reshape(-1, 1)
+                ).flatten()
+                
+                # Apply continuity constraint: ensure first prediction is close to current price
+                current_price = prices[-1]
+                first_prediction = prediction[0]
+                
+                # If first prediction is too far from current price, adjust the entire sequence
+                price_diff_ratio = abs(first_prediction - current_price) / current_price
+                
+                if price_diff_ratio > 0.02:  # If difference > 2%
+                    print(f"⚠️ Large initial prediction difference detected: {price_diff_ratio:.2%}")
+                    print(f"Current: ${current_price:,.2f}, First prediction: ${first_prediction:,.2f}")
+                    
+                    # Calculate adjustment factor to make first prediction closer to current price
+                    # Use a smooth transition: first prediction should be within 1% of current price
+                    target_first_prediction = current_price * (1 + np.sign(first_prediction - current_price) * 0.01)
+                    adjustment_factor = target_first_prediction / first_prediction
+                    
+                    # Apply gradual adjustment across the prediction sequence
+                    for i in range(len(prediction)):
+                        # Gradual adjustment: stronger at beginning, weaker at end
+                        adjustment_strength = 1.0 - (i / len(prediction)) * 0.5
+                        adjusted_factor = 1.0 + (adjustment_factor - 1.0) * adjustment_strength
+                        prediction[i] *= adjusted_factor
+                    
+                    print(f"✅ Applied continuity adjustment. New first prediction: ${prediction[0]:,.2f}")
+                
+                # Calculate confidence (based on recent price volatility)
+                recent_volatility = np.std(prices[-50:])
+                confidence = max(0.1, 1.0 - (recent_volatility / np.mean(prices[-50:])))
+                
+                # Additional confidence penalty for large initial jumps
+                initial_jump = abs(prediction[0] - current_price) / current_price
+                if initial_jump > 0.01:  # 1% jump
+                    confidence *= (1.0 - initial_jump * 2)  # Reduce confidence for large jumps
+                    confidence = max(0.1, confidence)
+                
+                return {
+                    'prices': prediction,
+                    'confidence': confidence,
+                    'timestamp': datetime.now(),
+                    'current_price': prices[-1],
+                    'lookback_start': prices[-self.lookback_window],
+                    'volatility': recent_volatility
+                }
         except Exception as e:
             print(f"Error in prediction: {e}")
             return None
